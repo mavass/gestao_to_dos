@@ -187,11 +187,13 @@ def parse_date(s: str) -> Optional[date]:
 
 
 def _get_openai_key() -> str:
+    """Lê a chave exclusivamente de st.secrets['OPENAI_API_KEY'].
+    No deploy, configure em Settings → Secrets (não no repositório)."""
     try:
-        from api_key_chatgpt import OPENAI_API_KEY as _K  # opcional
-        return _K or os.environ.get("OPENAI_API_KEY", "")
+        import streamlit as st
+        return str(st.secrets.get("OPENAI_API_KEY", "")).strip()
     except Exception:
-        return os.environ.get("OPENAI_API_KEY", "")
+        return ""
 
 
 def openai_triage(texto: str) -> Optional[List[Dict[str, Any]]]:
@@ -545,3 +547,4 @@ with tab5:
                         if cols[2].button('🗑️ Apagar', key=f'lp_del_{row.id}'):
                             delete_long_term(int(row.id))
                             st.rerun()
+
