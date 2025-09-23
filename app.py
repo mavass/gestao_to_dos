@@ -12,6 +12,10 @@ from typing import List, Dict, Any, Optional
 import streamlit as st
 import pandas as pd
 
+import base64
+import json
+import requests
+
 DB_PATH = 'todos.db'
 
 # -----------------------------
@@ -67,6 +71,37 @@ CREATE INDEX IF NOT EXISTS idx_fups_pessoa_area ON fups_team (pessoa_area);
 """
 
 
+# --- util para ler secrets com segurança ---
+def _get_secret(name: str, default: str = "") -> str:
+    try:
+        import streamlit as st
+        return str(st.secrets.get(name, default)).strip()
+    except Exception:
+        return default
+
+
+    # 1) pegar SHA atual do arquivo (se existir)
+    api_base = f"https://api.github.com/repos/{repo}/contents/{repo_path}"
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
+    params = {"ref": branch}
+    resp = requests.get(api_base, headers=headers, params=params)
+    sha = resp.json().get("sha") if resp.status_code == 200 else None
+
+    # 2) ler binário e enviar
+    with open(path, "rb") as f:
+        content_b64 = base64.b64encode(f.read()).decode("utf-8")
+
+    payload = {
+        "message": f"chore(db): update {repo_path} via app",
+        "content": content_b64,
+        "branch": branch,
+    }
+    if sha:
+        payload["sha"] = sha
+
+    put = requests.put(api_base, headers=headers, data=json.dumps(payload))
+    return put.status_code in (200, 201)
+
 def get_conn():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
@@ -94,19 +129,50 @@ def insert_task(d: Dict[str, Any]) -> int:
     qmarks = ','.join('?' for _ in d)
     with closing(get_conn()) as conn, conn:
         cur = conn.execute(f"INSERT INTO tasks ({keys}) VALUES ({qmarks})", list(d.values()))
-        return cur.lastrowid
-
+        task_id = cur.lastrowid
+    sync_db_to_github()
+    return task_id
 
 def update_task(task_id: int, d: Dict[str, Any]):
     set_clause = ','.join([f"{k}=?" for k in d.keys()])
     with closing(get_conn()) as conn, conn:
         conn.execute(f"UPDATE tasks SET {set_clause} WHERE id=?", list(d.values()) + [task_id])
-
+    sync_db_to_github()
 
 def delete_task(task_id: int):
     with closing(get_conn()) as conn, conn:
         conn.execute("DELETE FROM tasks WHERE id=?", (task_id,))
+    sync_db_to_github()
 
+def insert_long_term(empresa: str, pessoa_area: str, lembrete: str) -> int:
+    with closing(get_conn()) as conn, conn:
+        cur = conn.execute(
+            "INSERT INTO long_term (empresa, pessoa_area, lembrete) VALUES (?, ?, ?)",
+            (empresa, pessoa_area.strip(), lembrete.strip())
+        )
+        new_id = cur.lastrowid
+    sync_db_to_github()
+    return new_id
+
+def delete_long_term(item_id: int):
+    with closing(get_conn()) as conn, conn:
+        conn.execute("DELETE FROM long_term WHERE id=?", (item_id,))
+    sync_db_to_github()
+
+def insert_fup(empresa: str, pessoa_area: str, fup: str) -> int:
+    with closing(get_conn()) as conn, conn:
+        cur = conn.execute(
+            "INSERT INTO fups_team (empresa, pessoa_area, fup) VALUES (?, ?, ?)",
+            (empresa, pessoa_area.strip(), fup.strip())
+        )
+        new_id = cur.lastrowid
+    sync_db_to_github()
+    return new_id
+
+def delete_fup(item_id: int):
+    with closing(get_conn()) as conn, conn:
+        conn.execute("DELETE FROM fups_team WHERE id=?", (item_id,))
+    sync_db_to_github()
 
 def fetch_tasks(where: str = '', params: tuple = ()) -> pd.DataFrame:
     with closing(get_conn()) as conn:
@@ -547,4 +613,5 @@ with tab5:
                         if cols[2].button('🗑️ Apagar', key=f'lp_del_{row.id}'):
                             delete_long_term(int(row.id))
                             st.rerun()
+
 
