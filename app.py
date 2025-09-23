@@ -79,7 +79,24 @@ def _get_secret(name: str, default: str = "") -> str:
     except Exception:
         return default
 
-
+# --- nova função: sincronizar todos.db com GitHub ---
+def sync_db_to_github(path: str = DB_PATH) -> bool:
+    """
+    Faz commit do arquivo SQLite no GitHub usando a API.
+    Requer em st.secrets:
+      - GITHUB_TOKEN
+      - GH_REPO (ex.: "usuario/gestao_to_dos")
+      - GH_BRANCH (ex.: "main")
+      - GH_DB_PATH (caminho no repo, ex.: "todos.db")
+    Retorna True se conseguiu enviar, False caso contrário.
+    """
+    token = _get_secret("GITHUB_TOKEN")
+    repo = _get_secret("GH_REPO")
+    branch = _get_secret("GH_BRANCH", "main")
+    repo_path = _get_secret("GH_DB_PATH", "todos.db")
+    if not (token and repo and os.path.exists(path)):
+        return False
+        
     # 1) pegar SHA atual do arquivo (se existir)
     api_base = f"https://api.github.com/repos/{repo}/contents/{repo_path}"
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
@@ -613,5 +630,6 @@ with tab5:
                         if cols[2].button('🗑️ Apagar', key=f'lp_del_{row.id}'):
                             delete_long_term(int(row.id))
                             st.rerun()
+
 
 
